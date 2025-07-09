@@ -1,12 +1,14 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from '@supabase/supabase-js';
+
 export const runtime = "edge";
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! 
+  process.env.SUPABASE_SERVICE_ROLE_KEY!  // Make sure this is added in .env
 );
 
 export async function POST(req: Request) {
@@ -18,38 +20,49 @@ export async function POST(req: Request) {
       parts: [{ text: msg.content }],
     }));
 
+    let fullResponse = "";
+
     const result = await model.generateContentStream({ contents: geminiMessages });
 
     const encoder = new TextEncoder();
-    let fullResponse = "";
-
     const stream = new ReadableStream({
       async start(controller) {
-        try {
-          for await (const chunk of result.stream) {
-            const text = chunk.text();
-            if (text) {
-              fullResponse += text;
-              controller.enqueue(encoder.encode(text));
-            }
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          if (text) {
+            fullResponse += text;
+            controller.enqueue(encoder.encode(text));
           }
-
-          // Save assistant message to Supabase after streaming
-          if (chat_id && user_id && fullResponse.trim()) {
-            await supabase.from("messages").insert([
-              {
-                chat_id,
-                role: "assistant",
-                content: fullResponse.trim(),
-              },
-            ]);
-          }
-
-          controller.close();
-        } catch (streamErr) {
-          console.error("Stream reading error:", streamErr);
-          controller.error(streamErr);
         }
+
+        if (chat_id && user_id && fullResponse.trim()) {
+          const { data: chatData, error: fetchError } = await supabase
+            .from("chats")
+            .select("id, title")
+            .eq("id", chat_id)
+            .single();
+
+          if (!fetchError && chatData && chatData.title === "New Chat") {
+            const titlePrompt = `Give a 3-5 word title for this conversation: \"${messages[0].content}\"`;
+            const titleResult = await model.generateContent({
+              contents: [{ role: "user", parts: [{ text: titlePrompt }] }],
+            });
+
+            const suggestedTitle = titleResult.response.text().replaceAll("\n", "").trim();
+
+            await supabase.from("chats").update({ title: suggestedTitle }).eq("id", chat_id);
+          }
+
+          await supabase.from("messages").insert([
+            {
+              chat_id,
+              role: "assistant",
+              content: fullResponse.trim(),
+            },
+          ]);
+        }
+
+        controller.close();
       },
     });
 
