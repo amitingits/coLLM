@@ -8,7 +8,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!  // Make sure this is added in .env
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export async function POST(req: Request) {
@@ -43,7 +43,11 @@ export async function POST(req: Request) {
             .single();
 
           if (!fetchError && chatData && chatData.title === "New Chat") {
-            const titlePrompt = `Give a 3-5 word title for this conversation: \"${messages[0].content}\"`;
+            const titlePrompt = `Return only a 3 to 5 word title that summarizes the conversation below. 
+                                  Do not explain, suggest, or greet. 
+                                  Return only the title text. No punctuation. 
+                                  Context: \"${messages[0].content}\"`;
+
             const titleResult = await model.generateContent({
               contents: [{ role: "user", parts: [{ text: titlePrompt }] }],
             });

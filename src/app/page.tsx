@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import InviteModal from "@/components/InviteModal";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -22,6 +23,15 @@ const DotLoader = () => (
   </div>
 );
 
+const generateCode = () => {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+};
+
 export default function HomePage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -31,24 +41,30 @@ export default function HomePage() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chatTitles, setChatTitles] = useState<any[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
 
   const router = useRouter();
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const createChatIfNotExists = async () => {
+  const createChatIfNotExists = async (): Promise<string | null> => {
     if (!currentChatId && currentUserId) {
-      const { data, error } = await supabase.from("chats").insert([
-        { user_id: currentUserId, title: "New Chat" },
-      ]).select().single();
+      const { data, error } = await supabase
+        .from("chats")
+        .insert([{ user_id: currentUserId, title: "New Chat" }])
+        .select()
+        .single();
 
       if (error) {
         console.error("Chat creation failed", error);
+        return null;
       } else {
         setCurrentChatId(data.id);
         fetchChatTitles();
+        return data.id;
       }
     }
+    return currentChatId;
   };
 
   const fetchChatTitles = async () => {
@@ -63,19 +79,26 @@ export default function HomePage() {
   };
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: input };
-    await createChatIfNotExists();
-
-    if (currentChatId && currentUserId) {
-      await supabase.from("messages").insert([
-        { chat_id: currentChatId, role: "user", content: input },
-      ]);
-    }
 
     setMessages((prev) => [...prev, userMsg]);
 
-    // Add assistant streaming bubble separately
+    if (!input.trim()) return;
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: input };
+
+    const chatId = await createChatIfNotExists();
+    if (!chatId || !currentUserId) return;
+
+    const { error: insertError } = await supabase.from("messages").insert([
+      { chat_id: chatId, role: "user", content: input },
+    ]);
+
+    if (insertError) {
+      console.error("Error inserting message:", insertError);
+      return;
+    }
+
+
+
     setTimeout(() => {
       setMessages((prev) => [...prev, { id: "streaming", role: "assistant", content: "" }]);
     }, 0);
@@ -89,7 +112,7 @@ export default function HomePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [...messages, userMsg],
-        chat_id: currentChatId,
+        chat_id: chatId,
         user_id: currentUserId,
       }),
       signal: controller.signal,
@@ -165,6 +188,37 @@ export default function HomePage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+
+  const handleInvite = async () => {
+    if (!currentUserId || !currentChatId) return;
+
+    const { data: existingRoom, error: fetchError } = await supabase
+      .from("rooms")
+      .select("code")
+      .eq("created_by", currentUserId)
+      .eq("chat_id", currentChatId)
+      .single();
+
+    if (fetchError && fetchError.code !== "PGRST116") {
+      console.error("Error checking existing room:", fetchError);
+      return;
+    }
+
+    if (existingRoom?.code) {
+      setInviteCode(existingRoom.code);
+    } else {
+      const code = generateCode();
+      const { error } = await supabase.from("rooms").insert([
+        { created_by: currentUserId, chat_id: currentChatId, code: code },
+      ]);
+      if (!error) {
+        setInviteCode(code);
+      } else {
+        console.error("Room creation failed", error);
+      }
+    }
+  };
+
   if (!authenticated) {
     return (
       <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -173,11 +227,18 @@ export default function HomePage() {
     );
   }
 
+
   return (
+    <>
+     {inviteCode && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md bg-black/30">
+    <InviteModal code={inviteCode} onClose={() => setInviteCode(null)} />
+  </div>
+)}
     <div className="min-h-screen bg-gray-900 text-white flex">
       {/* Sidebar */}
       <aside className={`bg-gray-800 p-4 w-64 border-r border-gray-700 fixed z-40 h-full top-0 left-0 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
-        <div className="pt-16"> {/* Add this wrapper with padding top */}
+        <div className="pt-16">
           <h2 className="text-lg font-semibold mb-4">History</h2>
 
           {/* Buttons Section */}
@@ -205,7 +266,8 @@ export default function HomePage() {
               <button className="flex-2 bg-green-600 hover:bg-green-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-2/3">
                 Join
               </button>
-              <button className="flex-1 bg-purple-600 hover:bg-purple-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-1/3">
+              <button className="flex-1 bg-purple-600 hover:bg-purple-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-1/3"
+                onClick={handleInvite}>
                 Invite
               </button>
             </div>
@@ -225,10 +287,11 @@ export default function HomePage() {
           </div>
         </div>
       </aside>
-
+      
       {/* Main Content */}
       <div className="flex-1 flex flex-col ml-0 md:ml-64">
         {/* Floating Header */}
+        
         <div className="fixed top-0 left-0 right-0 z-50 flex w-full flex-nowrap border-b border-gray-700 p-4 items-center justify-between bg-gray-800 transition-all duration-200"
           style={{ marginLeft: isSidebarOpen ? 0 : undefined }}
         >
@@ -326,5 +389,6 @@ export default function HomePage() {
         </div>
       </div>
     </div>
+    </>
   );
 }
