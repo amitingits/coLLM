@@ -1,36 +1,103 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# coLLM: A Collaborative Workspace with Integrated Language Model Functionality
 
-## Getting Started
+<p align="center">
+<a href="#project-overview"><strong>Overview</strong></a> ·
+<a href="#core-functionality"><strong>Functionality</strong></a> ·
+<a href="#technical-architecture"><strong>Architecture</strong></a> ·
+<a href="#setup-and-installation"><strong>Installation</strong></a> ·
+<a href="#contribution-guidelines"><strong>Contributing</strong></a>
+</p>
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Project Overview
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**coLLM** is a collaborative software platform designed to integrate real-time, multi-user document editing with the capabilities of a Large Language Model (LLM). The application provides a unified workspace where users can engage in simultaneous content creation and interact with an intelligent assistant powered by the Google Gemini API.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+This system is intended for teams engaged in tasks such as software documentation, academic writing, or creative brainstorming, offering a tool to enhance collaborative productivity and leverage artificial intelligence for content generation and analysis.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Core Functionality
 
-## Learn More
+* **Real-time Collaboration:** Facilitates simultaneous document editing by multiple users, with all modifications synchronized instantly across all clients.
+* **Integrated AI Assistant:** Enables direct interaction with the Gemini LLM for functions such as querying information, generating text, summarizing content, and assisting in brainstorming sessions.
+* **Unified Workspace:** Provides a single, cohesive interface that combines the collaborative document editor with the AI chat functionality, allowing for a seamless workflow.
+* **Secure and Scalable Backend:** Utilizes Supabase for robust user authentication, database management, and real-time data synchronization.
+* **Performant Frontend:** Features a responsive and efficient user interface developed with Next.js and TypeScript, ensuring a smooth user experience.
 
-To learn more about Next.js, take a look at the following resources:
+## Technical Architecture
+The project is implemented using a modern, full-stack architecture composed of the following technologies:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Component              | Technology                                       |
+| ---------------------- | ------------------------------------------------ |
+| **Frontend** | Next.js, React, TypeScript, Tailwind CSS         |
+| **Backend & Database** | Supabase (PostgreSQL, Authentication, Realtime)  |
+| **Primary Language** | TypeScript                                       |
+| **AI Model API** | Google Gemini API                                |
+| **Deployment** | Vercel                                           |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Setup and Installation
 
-## Deploy on Vercel
+To deploy a local instance of this application, please follow the subsequent steps.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Prerequisites
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Ensure that Node.js and the Node Package Manager (npm) are installed on the local machine.
+
+* **npm**
+    ```sh
+    npm install npm@latest -g
+    ```
+
+### Installation Procedure
+
+1.  **Obtain API Credentials:**
+    * Register a project on [Supabase](https://supabase.com) to acquire a Project URL and an `anon` key.
+    * Generate an API key for the Gemini API via the [Google AI Studio](https://aistudio.google.com/).
+
+2.  **Clone the Repository:**
+    ```sh
+    git clone <repository-link>
+    cd collm
+    ```
+
+3.  **Install Project Dependencies:**
+    ```sh
+    npm install
+    ```
+
+4.  **Configure Environment Variables:**
+    Create a file named `.env.local` in the project's root directory and populate it with the acquired credentials:
+    ```env
+    NEXT_PUBLIC_SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+    GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+    ```
+
+5.  **Execute the Development Server:**
+    ```sh
+    npm run dev
+    ```
+
+The application will be accessible at `http://localhost:3000` in a web browser.
+
+## Contribution Guidelines
+
+Contributions to the project are welcome. Suggestions for improvements can be made by forking the repository and submitting a pull request, or by opening a new issue with the "enhancement" tag.
+
+The standard process for contributing is as follows:
+
+1.  Fork the Project.
+2.  Create a new branch for your feature (`git checkout -b feature/NewFeature`).
+3.  Commit your changes with a descriptive message (`git commit -m 'Implement NewFeature'`).
+4.  Push the branch to your fork (`git push origin feature/NewFeature`).
+5.  Open a Pull Request for review.
+
+## 📄 License
+
+This project is distributed under the MIT License. Refer to the `LICENSE` file for additional information.
+
+## 📧 Contact Information
+
+Amit Uttam Das - [@amitingits](https://github.com/amitingits) - amituttamdas24@gmail.com
+
+Project Repository: [https://github.com/your-username/collm](https://github.com/your-username/collm)
