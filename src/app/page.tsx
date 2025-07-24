@@ -14,9 +14,12 @@ import { Plus, Users, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface Message {
-  id: string;
+  id: string; // Always use DB id
   role: "user" | "assistant";
   content: string;
+  created_at?: string;
+  pending?: boolean;
+  client_id?: string; // Added for client-side deduplication
 }
 
 const DotLoader = () => (
@@ -122,25 +125,41 @@ export default function HomePage() {
 
   const sendMessage = async (inputMsg: string) => {
     if (!inputMsg.trim()) return;
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: inputMsg };
-
+    // Optimistically add the user message with a temporary id and pending flag
+    const tempId = crypto.randomUUID();
+    const userMsg: Message = { id: tempId, role: "user", content: inputMsg, created_at: undefined, pending: true, client_id: tempId } as any;
     setMessages((prev) => [...prev, userMsg]);
 
     const chatId = await createChatIfNotExists();
     if (!chatId || !currentUserId) return;
 
-    const { error: insertError } = await supabase.from("messages").insert([
-      { chat_id: chatId, role: "user", content: inputMsg },
-    ]);
+    const { data: inserted, error: insertError } = await supabase.from("messages").insert([
+      { chat_id: chatId, role: "user", content: inputMsg, client_id: userMsg.client_id },
+    ]).select("id, role, content, created_at, client_id").single();
 
     if (insertError) {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
       console.error("Error inserting message:", insertError);
       return;
     }
 
-    setTimeout(() => {
-      setMessages((prev) => [...prev, { id: "streaming", role: "assistant", content: "" }]);
-    }, 0);
+    // Replace pending message with DB row to prevent flicker on host
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === tempId);
+      if (idx === -1) return prev;
+      const updated = [...prev];
+      updated[idx] = {
+        id: inserted.id,
+        role: inserted.role,
+        content: inserted.content,
+        created_at: inserted.created_at,
+        client_id: inserted.client_id,
+      } as any;
+      return updated;
+    });
+
+    // Add streaming placeholder
+    setMessages((prev) => [...prev, { id: "streaming", role: "assistant", content: "" }]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -172,10 +191,7 @@ export default function HomePage() {
       );
     }
 
-    setMessages((prev) => {
-      const filtered = prev.filter((m) => m.id !== "streaming");
-      return [...filtered, { id: crypto.randomUUID(), role: "assistant", content: assistantReply }];
-    });
+    // Do NOT remove streaming placeholder here; realtime handler will replace it when assistant message arrives.
 
     setLoading(false);
     abortControllerRef.current = null;
@@ -191,17 +207,26 @@ export default function HomePage() {
     setChatLoading(true);
     const { data } = await supabase
       .from("messages")
-      .select("role, content")
+      .select("id, role, content, created_at, client_id")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: true });
 
-    setMessages(
-      data?.map((msg: any) => ({
-        id: crypto.randomUUID(),
-        role: msg.role,
-        content: msg.content,
-      })) || []
-    );
+    setMessages((prev) => {
+      const loadedIds = new Set(data?.map((msg: any) => msg.id));
+      // Remove any messages with the same id as those loaded
+      const filtered = prev.filter((m) => !loadedIds.has(m.id));
+      // Add the loaded messages
+      return [
+        ...filtered,
+        ...(data?.map((msg: any) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          created_at: msg.created_at,
+          client_id: msg.client_id,
+        })) || [])
+      ];
+    });
     setCurrentChatId(chatId);
     setIsSidebarOpen(false);
     setChatLoading(false);
@@ -227,6 +252,82 @@ export default function HomePage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // In the real-time subscription, robustly handle deduplication and pending replacement
+  useEffect(() => {
+    if (!currentChatId) return;
+
+    console.log('Setting up realtime subscription for chat:', currentChatId);
+
+    const channel = supabase
+      .channel('room-messages-' + currentChatId)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        (payload) => {
+          const newMsg = payload.new;
+          // Only process messages for the current chat
+          if (newMsg.chat_id !== currentChatId) return;
+          console.log('Realtime event:', newMsg, 'Current chat:', currentChatId);
+          setMessages((prev) => {
+            // Remove any pending message with the same content and role
+            const pendingIndex = prev.findIndex(
+              (m) => m.pending && m.content === newMsg.content && m.role === newMsg.role
+            );
+            if (pendingIndex !== -1) {
+              // Replace the pending message in place to preserve order
+              const updated = [...prev];
+              updated[pendingIndex] = {
+                id: newMsg.id,
+                role: newMsg.role,
+                content: newMsg.content,
+                created_at: newMsg.created_at,
+                client_id: newMsg.client_id,
+              };
+              return updated;
+            }
+            // If streaming placeholder exists and assistant message arrives, replace it
+            if (newMsg.role === 'assistant') {
+              const streamIdx = prev.findIndex((m) => m.id === 'streaming');
+              if (streamIdx !== -1) {
+                const updated = [...prev];
+                updated[streamIdx] = {
+                  id: newMsg.id,
+                  role: newMsg.role,
+                  content: newMsg.content,
+                  created_at: newMsg.created_at,
+                  client_id: newMsg.client_id,
+                };
+                return updated;
+              }
+            }
+            // Check if the real message already exists by id
+            if (prev.some((m) => m.id === newMsg.id)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                id: newMsg.id,
+                role: newMsg.role,
+                content: newMsg.content,
+                created_at: newMsg.created_at,
+                client_id: newMsg.client_id,
+              },
+            ];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentChatId]);
 
   const handleJoin = async (code: string) => {
     if (!currentUserId) return;
@@ -333,6 +434,13 @@ export default function HomePage() {
       </main>
     );
   }
+
+  const sortedMessages = [...messages].sort((a, b) => {
+    if (a.created_at && b.created_at) {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    }
+    return 0;
+  });
 
 
   return (
@@ -494,8 +602,9 @@ export default function HomePage() {
               <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
           )}
-          {messages.map((msg, idx) => {
-            const nextMsg = messages[idx + 1];
+          {/* Before rendering messages, sort them by created_at */}
+          {sortedMessages.map((msg, idx) => {
+            const nextMsg = sortedMessages[idx + 1];
             const isRoleChange = nextMsg && nextMsg.role !== msg.role;
             const marginClass = isRoleChange ? 'mb-4' : 'mb-2';
             return (
