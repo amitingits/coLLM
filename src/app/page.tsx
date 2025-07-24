@@ -8,6 +8,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
+import JoinModal from "@/components/JoinModal";
+import ChatInput from "@/components/ChatInput";
 
 interface Message {
   id: string;
@@ -42,6 +44,8 @@ export default function HomePage() {
   const [chatTitles, setChatTitles] = useState<any[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinSuccess, setJoinSuccess] = useState(false);
 
   const router = useRouter();
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -68,28 +72,54 @@ export default function HomePage() {
   };
 
   const fetchChatTitles = async () => {
-    if (currentUserId) {
-      const { data } = await supabase
-        .from("chats")
-        .select("id, title")
-        .eq("user_id", currentUserId)
-        .order("created_at", { ascending: false });
-      if (data) setChatTitles(data);
-    }
-  };
+  if (!currentUserId) return;
 
-  const sendMessage = async () => {
+  // 1. Fetch personal chats
+  const { data: ownChatsData } = await supabase
+    .from("chats")
+    .select("id, title, created_at")
+    .eq("user_id", currentUserId);
+
+  const ownChats = ownChatsData ?? [];
+
+  // 2. Fetch shared chats from joined rooms
+  const { data: joinedRooms } = await supabase
+    .from("room_users")
+    .select("rooms(chat_id)")
+    .eq("user_id", currentUserId);
+
+  const sharedChatIds = joinedRooms?.map((r: any) => r.rooms.chat_id) || [];
+
+  let sharedChats: { id: string; title: string; created_at: string }[] = [];
+
+  if (sharedChatIds.length > 0) {
+    const { data: chats } = await supabase
+      .from("chats")
+      .select("id, title, created_at")
+      .in("id", sharedChatIds);
+
+    sharedChats = chats || [];
+  }
+
+  // 3. Combine and set
+  const allChats = [...ownChats, ...sharedChats].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  setChatTitles(allChats);
+};
+
+
+  const sendMessage = async (inputMsg: string) => {
+    if (!inputMsg.trim()) return;
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: inputMsg };
 
     setMessages((prev) => [...prev, userMsg]);
-
-    if (!input.trim()) return;
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: input };
 
     const chatId = await createChatIfNotExists();
     if (!chatId || !currentUserId) return;
 
     const { error: insertError } = await supabase.from("messages").insert([
-      { chat_id: chatId, role: "user", content: input },
+      { chat_id: chatId, role: "user", content: inputMsg },
     ]);
 
     if (insertError) {
@@ -97,12 +127,9 @@ export default function HomePage() {
       return;
     }
 
-
-
     setTimeout(() => {
       setMessages((prev) => [...prev, { id: "streaming", role: "assistant", content: "" }]);
     }, 0);
-    setInput("");
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -188,6 +215,57 @@ export default function HomePage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const handleJoin = async (code: string) => {
+  if (!currentUserId) return;
+
+  const { data: room, error: fetchError } = await supabase
+    .from("rooms")
+    .select("id, chat_id")
+    .eq("code", code)
+    .single();
+
+  if (fetchError && fetchError.code !== "PGRST116") {
+    console.error("Error checking room:", fetchError);
+    return;
+  }
+
+  if (!room) {
+    console.error("Invalid invite code");
+    return;
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("room_users")
+    .select("id")
+    .eq("user_id", currentUserId)
+    .eq("room_id", room.id)
+    .maybeSingle();
+
+  if (existing) {
+    console.log("Already joined room");
+    await loadChat(room.chat_id);
+    setJoinSuccess(true);
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("room_users").insert([
+    {
+      user_id: currentUserId,
+      room_id: room.id,
+      joined_at: new Date(),
+    },
+  ]);
+
+  if (insertError) {
+    console.error("Joining room failed", insertError);
+    return;
+  }
+
+  await loadChat(room.chat_id);
+  setJoinSuccess(true);
+  fetchChatTitles();
+};
+
 
   const handleInvite = async () => {
     if (!currentUserId || !currentChatId) return;
@@ -235,6 +313,22 @@ export default function HomePage() {
     <InviteModal code={inviteCode} onClose={() => setInviteCode(null)} />
   </div>
 )}
+    {showJoinModal && (
+      <JoinModal onJoin={handleJoin} onClose={() => setShowJoinModal(false)} />
+    )}
+    {joinSuccess && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md bg-black/30">
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg text-white w-80 text-center border border-gray-600">
+          <h2 className="text-xl font-semibold mb-4">Joined Room successfully</h2>
+          <button
+            onClick={() => setJoinSuccess(false)}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition-transform active:scale-95 mt-4 w-full"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )}
     <div className="min-h-screen bg-gray-900 text-white flex">
       {/* Sidebar */}
       <aside className={`bg-gray-800 p-4 w-64 border-r border-gray-700 fixed z-40 h-full top-0 left-0 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
@@ -263,7 +357,8 @@ export default function HomePage() {
 
             {/* Join & Invite Buttons in 2:1 Ratio */}
             <div className="flex gap-2">
-              <button className="flex-2 bg-green-600 hover:bg-green-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-2/3">
+              <button className="flex-2 bg-green-600 hover:bg-green-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-2/3"
+                onClick={() => setShowJoinModal(true)}>
                 Join
               </button>
               <button className="flex-1 bg-purple-600 hover:bg-purple-700 active:scale-95 transition transform text-white px-3 py-2 rounded text-sm w-1/3"
@@ -279,7 +374,11 @@ export default function HomePage() {
               <button
                 key={chat.id}
                 onClick={() => loadChat(chat.id)}
-                className="block w-full text-left px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm transition-colors"
+                className={`block w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                  chat.id === currentChatId
+                    ? "bg-blue-500/40 font-semibold"
+                    : "bg-gray-700 hover:bg-gray-600"
+                }`}
               >
                 {chat.title || "Untitled"}
               </button>
@@ -352,39 +451,14 @@ export default function HomePage() {
         {/* Floating Input Box (Centered and Fixed) */}
         <div className="fixed bottom-4 w-full flex justify-center z-50 px-4 md:pl-64">
           <div className="w-full max-w-3xl px-4">
-            <form
-              onSubmit={(e) => {
+            <ChatInput
+              loading={loading}
+              onSend={(msg) => {
                 setLoading(true);
-                e.preventDefault();
-                sendMessage();
+                sendMessage(msg);
               }}
-              className="flex gap-2 bg-gray-800 p-3 rounded-lg border border-gray-700"
-            >
-              <input
-                type="text"
-                className="flex-1 p-3 bg-gray-700 text-white rounded-md outline-none"
-                placeholder="Type your message..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-              />
-              {loading ? (
-                <button
-                  type="button"
-                  onClick={cancelStreaming}
-                  className="bg-red-600 hover:bg-red-700 active:scale-95 transition transform px-4 py-2 rounded-md"
-                >
-                  Cancel
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition transform px-4 py-2 rounded-md disabled:opacity-50"
-                  disabled={loading}
-                >
-                  Send
-                </button>
-              )}
-            </form>
+              onCancel={cancelStreaming}
+            />
           </div>
         </div>
       </div>
