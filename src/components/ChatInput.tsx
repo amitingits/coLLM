@@ -15,7 +15,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <div className="fixed bottom-4 left-0 w-full flex justify-center z-50 px-4 md:ml-24">
-      <div className="w-full max-w-4xl px-4">
+      <div className="w-full max-w-5xl px-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -35,17 +35,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
             <button
               type="button"
               onClick={onCancel}
-              className="bg-red-600 hover:bg-red-700 active:scale-95 transition transform px-4 py-2 rounded-md"
+              className="w-24 bg-red-600 hover:bg-red-900 transition-all px-4 py-2 rounded-md text-white font-semibold shadow-md"
             >
-              Cancel
+              <span className="inline-block transition-colors duration-150">Cancel</span>
             </button>
           ) : (
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition transform px-4 py-2 rounded-md disabled:opacity-50"
-              disabled={loading}
+              className="w-24 bg-blue-600 hover:bg-green-500 disabled:hover:bg-blue-600 transition-all px-4 py-2 rounded-md disabled:opacity-50 text-white font-semibold shadow-md"
+              disabled={loading || input.trim().length === 0}
             >
-              Send
+              <span className="inline-block transition-colors duration-150">Send</span>
             </button>
           )}
         </form>
